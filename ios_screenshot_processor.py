@@ -555,20 +555,15 @@ FOLLOW_UP: [suggested follow-up actions]"""
         return response
     
     def send_telegram_notification(self, response_data, analysis_id):
-        """Send notification to Telegram with action buttons"""
+        """Send notification to Telegram with screenshot image and action buttons"""
         try:
-            # Format message
-            message = f"*{response_data['source']}* _{response_data['timestamp']}_\n\n"
-            message += f"{response_data['summary']}\n\n"
-            
-            if 'app' in response_data:
-                message += f"{response_data['app']}\n"
-            if 'location' in response_data:
-                message += f"{response_data['location']}\n"
-            if 'filename' in response_data:
-                message += f"{response_data['filename']}\n"
-            
-            message += f"_Analysis ID: {analysis_id}_"
+            # Get the image data for this analysis
+            with self.callback_lock:
+                if analysis_id not in self.pending_analyses:
+                    print("❌ Analysis not found for Telegram notification")
+                    return False
+                analysis_data = self.pending_analyses[analysis_id]
+                image_data = analysis_data['image_data']
             
             # Create action buttons
             buttons = [
@@ -598,11 +593,85 @@ FOLLOW_UP: [suggested follow-up actions]"""
             
             reply_markup = {"inline_keyboard": buttons}
             
-            # Send message
+            # Decode base64 image data
+            try:
+                image_bytes = base64.b64decode(image_data['base64_data'])
+                image_size_mb = len(image_bytes) / (1024 * 1024)
+                print(f"🔍 Image decoded: {image_size_mb:.1f}MB")
+                
+                # Check Telegram photo size limit (10MB)
+                if len(image_bytes) > 10 * 1024 * 1024:
+                    print(f"⚠️  Image too large for Telegram ({image_size_mb:.1f}MB > 10MB)")
+                    return self.send_telegram_fallback_message(f"*{response_data['source']}* _{response_data['timestamp']}_\n\n{response_data['summary']}", reply_markup)
+                    
+            except Exception as e:
+                print(f"❌ Failed to decode image: {e}")
+                return False
+            
+            # SHORT caption for the photo (under 1024 characters)
+            short_caption = f"*{response_data['source']}* _{response_data['timestamp']}_"
+            
+            # Add basic metadata if present
+            if 'filename' in response_data:
+                short_caption += f"\n{response_data['filename']}"
+            
+            short_caption += f"\n_ID: {analysis_id}_"
+            
+            # Send photo with SHORT caption and buttons
+            url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendPhoto"
+            
+            files = {
+                'photo': ('screenshot.png', image_bytes, image_data['media_type'])
+            }
+            
+            data = {
+                'chat_id': self.telegram_chat_id,
+                'caption': short_caption,
+                'parse_mode': 'Markdown',
+                'reply_markup': json.dumps(reply_markup)
+            }
+            
+            print(f"📤 Sending {image_size_mb:.1f}MB photo with short caption...")
+            
+            # Send the photo
+            response = self.session.post(url, files=files, data=data, timeout=180)
+            
+            if response.status_code == 200:
+                print("📤 ✅ Screenshot sent successfully!")
+                
+                # Now send the FULL analysis as a separate text message
+                full_message = f"**AI Analysis:**\n\n{response_data['summary']}"
+                
+                # Add any additional metadata
+                if 'app' in response_data:
+                    full_message += f"\n\n{response_data['app']}"
+                if 'location' in response_data:
+                    full_message += f"\n{response_data['location']}"
+                
+                # Send the full analysis
+                self.send_telegram_message(full_message)
+                
+                return True
+            else:
+                print(f"📤 ❌ Telegram photo error: {response.status_code}")
+                print(f"📤 ❌ Error response: {response.text}")
+                
+                # Fallback: send as text message only
+                print("📤 ⚠️  Falling back to text-only message...")
+                full_caption = f"*{response_data['source']}* _{response_data['timestamp']}_\n\n{response_data['summary']}"
+                return self.send_telegram_fallback_message(full_caption, reply_markup)
+                
+        except Exception as e:
+            print(f"📤 ❌ Failed to send Telegram photo: {str(e)}")
+            return False
+
+    def send_telegram_fallback_message(self, message, reply_markup):
+        """Fallback method to send text-only message if photo fails"""
+        try:
             url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
             data = {
                 "chat_id": self.telegram_chat_id,
-                "text": message,
+                "text": f"📷 Screenshot processed\n\n{message}",
                 "parse_mode": "Markdown",
                 "reply_markup": json.dumps(reply_markup),
                 "disable_web_page_preview": True
@@ -611,16 +680,16 @@ FOLLOW_UP: [suggested follow-up actions]"""
             response = self.session.post(url, data=data, timeout=10)
             
             if response.status_code == 200:
-                print("📤 Notification sent to Telegram")
+                print("📤 Fallback text notification sent to Telegram")
                 return True
             else:
-                print(f"📤 Telegram error: {response.status_code}")
+                print(f"📤 Fallback message also failed: {response.status_code}")
                 return False
                 
         except Exception as e:
-            print(f"📤 Failed to send Telegram notification: {str(e)}")
+            print(f"📤 Fallback message failed: {str(e)}")
             return False
-    
+
     def start_callback_polling(self):
         """Start polling for Telegram callback queries"""
         def poll():
@@ -635,7 +704,7 @@ FOLLOW_UP: [suggested follow-up actions]"""
         polling_thread = threading.Thread(target=poll, daemon=True)
         polling_thread.start()
         print("🔄 Telegram callback polling started")
-    
+
     def check_for_callbacks(self):
         """Check for and handle Telegram callback queries"""
         try:
@@ -662,7 +731,7 @@ FOLLOW_UP: [suggested follow-up actions]"""
                     
         except Exception as e:
             pass  # Silently handle polling errors
-    
+
     def handle_callback(self, callback_data, callback_id):
         """Handle Telegram button press callbacks"""
         try:
@@ -695,6 +764,24 @@ FOLLOW_UP: [suggested follow-up actions]"""
                 
         except Exception as e:
             print(f"Callback handling error: {e}")
+
+    def send_telegram_message(self, message):
+        """Send text message to Telegram"""
+        try:
+            url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
+            data = {
+                "chat_id": self.telegram_chat_id,
+                "text": message,
+                "parse_mode": "Markdown",
+                "disable_web_page_preview": True
+            }
+            
+            response = self.session.post(url, data=data, timeout=10)
+            return response.status_code == 200
+            
+        except Exception as e:
+            print(f"Failed to send message: {str(e)}")
+            return False
     
     def send_arxiv_research_summary(self, analysis_id):
         """Send arXiv research analysis"""
