@@ -89,6 +89,65 @@ On first launch, you'll be prompted to configure:
 - **Telegram Bot Token**: Message @BotFather on Telegram, send `/newbot`
 - **Telegram Chat ID**: Message @userinfobot on Telegram for your ID
 
+## iPhone Integration
+
+Set up iOS Shortcuts to automatically send screenshots from your iPhone to the Mac app for AI processing.
+
+### 1. Install Shortcuts App
+
+Download the free Shortcuts app from the App Store if not already installed.
+
+### 2. Create New Shortcut
+
+1. Open Shortcuts app and tap the "+" button
+2. Name it "Send Screenshot to Mac"
+
+### 3. Add Actions in Order
+
+#### Action 1: Get Latest Photos
+- Search for "Get the latest photos"
+- Set to get **1 photo**
+- Toggle **"Include Screenshots"** to ON
+
+#### Action 2: Encode Image
+- Search for "Encode"
+- Set input to "Latest Photos"
+- Set encoding to **"Base64"**
+
+#### Action 3: Format JSON
+- Search for "Text"
+- Enter this JSON format:
+```json
+{"image":"[Base64 Encoded]","metadata":{"source":"iPhone"}}
+```
+- Replace `[Base64 Encoded]` with output from step 2
+
+#### Action 4: Send to Mac
+- Search for "Get Contents of URL"
+- Set URL to: `http://YOUR_MAC_IP:5001/screenshot`
+- Set Method to **"POST"**
+- Under Headers, add: **Content-Type**: `application/json`
+- Set Request Body to "Text" (from step 3)
+
+### 4. Find Your Mac's IP Address
+
+On your Mac: **System Settings** → **Network** → Look for IP address (e.g., 192.168.1.100)
+
+> 💡 **Important**: Make sure your iPhone and Mac are on the same WiFi network
+
+### 5. Test & Automate
+
+1. Run the shortcut manually to test
+2. Go to **Automation** tab → Create new automation
+3. Trigger on "App" → "Screenshots" to auto-send
+
+### Troubleshooting iPhone Integration
+
+- Ensure Mac app is running on port 5001
+- Check firewall settings on Mac
+- Test URL in Safari: `http://YOUR_MAC_IP:5001`
+- Verify both devices on same network
+
 ## Usage
 
 1. **Launch the app** from Applications
@@ -156,4 +215,4 @@ python ios_screenshot_processor.py
 - All screenshot processing happens on your local machine
 - API calls are made directly to Anthropic's servers
 - No data is stored or transmitted without your explicit configuration
-- Telegram integration is entirely
+- Telegram integration is entirely optional
