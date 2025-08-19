@@ -53,7 +53,12 @@ pip install -r requirements.txt
 
 4. **Build the application:**
 ```bash
-Usethe commands in the BUILD.md
+Usethe commands in the BUILD.md OR
+# 1. Make the script executable (if not already)
+chmod +x build_enhanced.sh
+
+# 2. Run the script
+./build_enhanced.sh
 ```
 
 5. **Run the built app:**
